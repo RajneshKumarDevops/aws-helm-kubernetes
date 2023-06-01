@@ -1,0 +1,117 @@
+team:
+  name: "TeamName"
+
+rbac:
+  enabled: false
+rbacProd:
+  enabled: false
+
+image:
+  name: "Imagepath"
+  tag: "latest"
+  debug:
+    port: 5005
+    enabled: true
+
+canary:
+  enabled: false
+  suffix: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+  name: service-name
+
+ingress:
+  enabled: true
+  host: ingress-host-name
+  paths:
+      - /(|$)(.*)
+
+environment:
+  name: "dev"
+  replicas:
+    quantity: 1
+  resources:
+    xmx: 700M
+    xms: 200M
+    requests:
+      memory: "800Mi"
+      cpu: "100m"
+    limits:
+      memory: "2Gi"
+      cpu: "2"
+
+keda:
+  enabled: false
+
+serviceAccount:
+  enabled: true
+  roleARN: arn:aws:iam::***
+pullsecret:
+  enabled: true
+  name: oneapp-pull-secret
+
+secretstore:
+  enabled: false
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+# jaeger:
+#   image:
+#     name: Imagename
+#     version: 1.17.1
+#   host: Host:443
+
+grafana:
+  enabled: true
+  defaultDashboardsEnabled: true
+  defaultDashboardsTimezone: utc
+  service:
+    portName: http
+  serviceMonitor:
+    interval: 15s
+    selfMonitor: true
+    path: "/actuator/prometheus"
+    metricRelabelings: []
+    relabelings: []
+
+logging:
+  level:
+    org:
+      hibernate:
+        SQL: OFF
+      springframework:
+        web: INFO
+
+label:
+  validDays: 180
+  manualDeletionEnabled: ${MANUAL_DELETION_ENABLED:true}
+
+
+dynatrace:
+  enabled: true
+  oneagent:
+    enabled: false
+  clientId: "xxx"
+  paasToken: "xxx"
+  annotations:
+    appNameDarwin: "MMA_2.0(D)"
+    operationMode: "Development"
+  labels:
+    appNameDarwin: "MMA_2.0"
+    operationMode: "Development"
+
+#mongodb:
+#  uri: mongodb+srv://USERNAME:PASSWORD@service-test-pl-0.ttq7r.mongodb.net/?authSource=%24external&authMechanism=MONGODB-AWS&retryWrites=true&w=majority
+#  db: mpf-mobile-acquisition-service
+#  isLocal: false
+#  autodelete:
+#    enabled: true
+
+rules:
+  enabled: false
