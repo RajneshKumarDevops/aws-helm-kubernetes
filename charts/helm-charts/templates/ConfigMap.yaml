@@ -1,0 +1,25 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: {{ .Chart.Name }}-configmap{{ .Values.canary.suffix }}
+  labels:
+    dot.de/service: {{ .Chart.Name }}
+    dot.de/team: {{ .Values.team.name }}
+data:
+  application.yaml: |-
+    server:
+      port: {{ .Values.service.port }}
+    spring:
+      profile:
+        active: {{ .Values.environment.name }}
+      application:
+        name: {{ .Values.service.name }}
+    test:
+      password: ${SECRET_PASSWORD:unknown}
+    logging:
+      level:
+        org:
+          springframework:
+            web: {{ .Values.logging.level.org.springframework.web }}
+          hibernate:
+            SQL: {{ .Values.logging.level.org.hibernate.SQL }}
