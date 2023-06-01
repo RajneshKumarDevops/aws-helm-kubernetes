@@ -1,0 +1,40 @@
+{{- if .Values.keda.enabled -}}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+  labels:
+    deploymentName: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+    dot.de/service: {{ .Chart.Name }}
+    dot.de/team: {{ .Values.team.name }}
+spec:
+  cooldownPeriod: 30
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  pollingInterval:  {{ .Values.keda.pollingInterval }}
+  scaleTargetRef:
+    name: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          policies:
+          - periodSeconds: 15
+            type: Pods
+            value: 4
+          stabilizationWindowSeconds: 10
+  triggers:
+  {{- range .Values.keda.triggers }}
+    - type: {{ .type }}
+      metricType: {{ .metricType }}
+      metadata:
+      {{- if eq .type "prometheus" }}
+        serverAddress: {{ .serverAddress }}
+        metricName: {{ .metricName }}
+        threshold: {{ .threshold | squote }}
+        query: {{ tpl .query $ }}
+      {{- else }}
+        value: {{ .value | squote }}
+      {{- end }}
+  {{- end }}
+{{- end }}
