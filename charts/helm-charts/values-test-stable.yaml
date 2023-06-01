@@ -1,0 +1,14 @@
+environment:
+  name: "test-stable"
+
+rbac:
+  enabled: true
+
+image:
+  debug:
+    enabled: false
+
+dynatrace:
+  annotations:
+    appNameDarwin: 'MMA_2.0(T)'
+    operationMode: "Teststable"
