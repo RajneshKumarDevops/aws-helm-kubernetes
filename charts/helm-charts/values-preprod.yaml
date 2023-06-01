@@ -1,0 +1,14 @@
+environment:
+  name: "pre-prod"
+
+image:
+  debug:
+    enabled: false
+
+rbacProd:
+  enabled: true
+
+dynatrace:
+  annotations:
+    appNameDarwin: 'MMA_2.0(REF)'
+    operationMode: "Pre-Prod"
