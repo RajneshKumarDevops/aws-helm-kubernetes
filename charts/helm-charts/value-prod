@@ -1,0 +1,80 @@
+environment:
+  name: "prod"
+
+image:
+  debug:
+    enabled: false
+
+rbacProd:
+  enabled: true
+
+dynatrace:
+  annotations:
+    appNameDarwin: 'MMA_2.0(P)'
+    operationMode: "Production"
+
+keda:
+  enabled: enabled
+  maxReplicaCount: 15
+  minReplicaCount: 2
+  pollingInterval: 10
+  triggers:
+  - type: "prometheus"
+    metricType: "Value"
+    serverAddress: "http://victoria-metrics-victoria-metrics-cluster-vmselect.victoria-metrics.svc.cluster.local:8481/select/999/prometheus"
+    metricName: "response_time_calculation"
+    threshold: 25
+    query: 'sum(irate(http_server_requests_seconds_sum{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}"}[5m])) / sum(irate(http_server_requests_seconds_count{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}"}[5m]))'
+  - type: "prometheus"
+    metricType: "AverageValue"
+    serverAddress: "http://victoria-metrics-victoria-metrics-cluster-vmselect.victoria-metrics.svc.cluster.local:8481/select/999/prometheus"
+    metricName: "request_per_second"
+    threshold: 30
+    query: 'round(sum(increase(http_server_requests_seconds_count{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}"}[1m])) / 60)'
+  - type: "cpu"
+    metricType: "Utilization"
+    value: 60
+  - type: "memory"
+    metricType: "Utilization"
+    value: 60
+
+
+rules:
+  enabled: true
+  spec:
+  - alert: ResponseTimeAlert
+    annotations:
+      description: 'Service {{ $labels.service }} has a high response time in the last 1m'
+      summary: High Response Time.
+    expr: sum(irate(http_server_requests_seconds_sum{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}"}[5m])) / sum(irate(http_server_requests_seconds_count{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}"}[5m])) > 1
+    interval: 1m
+    labels:
+      severity: warning
+      team: set
+  - alert: ErrorRate
+    annotations:
+      description: 'Service {{ $labels.service }} has a high errors percentage in the last 1m'
+      summary: High Error Percentage.
+    expr: (sum(increase(http_server_requests_seconds_count{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}", uri!~"(.*actuator.*|.*swagger-ui.*|root)", status!~"[2-3].*"}[5m])) / sum(increase(http_server_requests_seconds_count{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}", uri!~"(.*actuator.*|.*swagger-ui.*|root)"}[5m])) * 100) > 5
+    interval: 1m
+    labels:
+      severity: critical
+      team: set
+  - alert: MemoryUsage
+    annotations:
+      description: 'Service {{ $labels.service }} memory consumption is >= 80%'
+      summary: High Memory Consumption.
+    expr: max(sum(container_memory_working_set_bytes{job="kubelet", metrics_path="/metrics/cadvisor", namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}", container!="", image!=""}) by (pod) / sum(cluster:namespace:pod_memory:active:kube_pod_container_resource_requests{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}"}) by (pod)) > 80
+    interval: 1m
+    labels:
+      severity: warning
+      team: set
+  - alert: CpuUsage
+    annotations:
+      description: 'Service {{ $labels.service }} CPU consumption is >= 80%'
+      summary: High CPU Consumption.
+    expr: max(sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}"}) by (pod) / sum(cluster:namespace:pod_cpu:active:kube_pod_container_resource_requests{namespace="{{ .Release.Namespace }}", service="{{ .Values.service.name }}{{ .Values.canary.suffix }}"}) by (pod)) > 80
+    interval: 1m
+    labels:
+      severity: warning
+      team: set
