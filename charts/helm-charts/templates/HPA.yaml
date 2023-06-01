@@ -1,0 +1,26 @@
+{{- if .Values.autoscaling.enabled -}}
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+  labels:
+    app: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+    dot.de/service: {{ .Chart.Name }}
+    dot.de/team: {{ .Values.team.name }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+  {{- with .Values.autoscaling.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ . }}
+  {{- end }}
+{{- end }}
