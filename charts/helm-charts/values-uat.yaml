@@ -1,0 +1,18 @@
+environment:
+  name: "uat"
+
+rbac:
+  enabled: true
+
+image:
+  debug:
+    enabled: false
+
+dynatrace:
+  annotations:
+    appNameDarwin: "MMA_2.0(UAT)"
+    operationMode: "UAT"
+
+serviceAccount:
+  enabled: true
+  roleARN: arn:aws:iam::**
