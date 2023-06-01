@@ -1,0 +1,32 @@
+{{- if .Values.dynatrace.enabled }}
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dynatrace-oneagent-metadata-viewer{{ .Values.canary.suffix }}
+  labels:
+    dot.de/service: {{ .Chart.Name }}
+    dot.de/team: {{ .Values.team.name }}
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dynatrace-oneagent-metadata-viewer-binding{{ .Values.canary.suffix }}
+  labels:
+    dot.de/service: {{ .Chart.Name }}
+    dot.de/team: {{ .Values.team.name }}
+subjects:
+- kind: ServiceAccount
+  name: default
+  apiGroup: ""
+- kind: ServiceAccount
+  name: {{ .Values.service.name }}-sa{{ .Values.canary.suffix }}
+  apiGroup: ""
+roleRef:
+  kind: Role
+  name: dynatrace-oneagent-metadata-viewer{{ .Values.canary.suffix }}
+  apiGroup: ""
+{{- end }}
