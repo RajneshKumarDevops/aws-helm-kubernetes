@@ -1,0 +1,30 @@
+image:
+  name: "image-name"
+  tag: "latest"
+  debug:
+    port: 5005
+    enabled: true
+
+environment:
+  name: dev
+  replicas:
+    quantity: 2
+  resources:
+    xmx: 1536M
+    xms: 768M
+    requests:
+      memory: "2Gi"
+      cpu: "2"
+    limits:
+      memory: "2Gi"
+      cpu: "2"
+
+canary:
+  enabled: true
+
+rbac:
+  enabled: true
+
+serviceAccount:
+  enabled: true
+  roleARN: arn:aws:iam::**
