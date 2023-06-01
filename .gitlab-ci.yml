@@ -1,0 +1,580 @@
+image: $DOCKER_WORKER_IMAGE
+
+variables:
+  IMAGE_NAME: $DOCKER_REGISTRY_URL/$CI_PROJECT_NAME
+  IMAGE_VERSION: $CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA
+  GRADLE_OPTIONS: --no-daemon -s --parallel --max-workers=2 --build-cache
+  SECURE_LOG_LEVEL: "info"
+  SAST_JAVA_VERSION: 17
+  FAIL_NEVER: 1
+  SAST_EXCLUDED_PATHS: "spec, test, tests, tmp, build.gradle, gradle"
+  KUBESEC_HELM_CHARTS_PATH: "charts"
+  APPLICATION: my-service
+  JACOCO_REPORT_LOCATION: "build/reports/jacoco/test/jacocoTestReport.csv"
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
+include:
+  - project: 'my/apps/cicd-common'
+    file: 'docker/build-publish-image-clean.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'jib/build-jib.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'docker/sign-image.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'gradle/sonarqube-analysis.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'docker/push-tag.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'docker/snapshot.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'release/changelog.yaml'
+    ref: 'master'
+  - project: 'oneapp/apps/cicd-common'
+    file: 'release/commitlint.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'release/autoversion.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'release/release-prod.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'release/release-uat.yaml'
+    ref: 'master'
+  - project: 'oneapp/apps/cicd-common'
+    file: 'helm/build-and-publish.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'helm/rollback-deployment.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'helm/deploy-values.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'code-quality/code-quality.yaml'
+    ref: 'master'
+  - project: 'my/apps/cicd-common'
+    file: 'helm/deploy-values-caas.yaml'
+    ref: 'caas-dynatrace'
+  - project: 'my/apps/mobile/mpf/ci'
+    file: 'deployment-notification.yml'
+    ref: 'main'
+  - project: 'my/apps/cicd-common'
+    file: 'loadtest/k6-loadtesting.yaml'
+    ref: 'master'
+#Gitlab Securuty scanning
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/Dependency-Scanning.gitlab-ci.yml
+  - template: Security/SAST-IaC.gitlab-ci.yml
+  - template: Security/License-Scanning.gitlab-ci.yml
+
+stages:
+    - lint
+    - build
+    - test
+    - publish
+    - scanning
+    - versioning
+    - sign
+    - staging
+    - loadtesting
+    - pre-production
+    - production
+    - rollback
+    - release
+    - changelog
+
+default:
+  before_script:
+    - chmod +x gradlew && export GRADLE_USER_HOME=`pwd`/.gradle
+    - echo $IMAGE_VERSION
+    - echo $IMAGE_NAME
+    - echo $DOCKER_AUTH_CONFIG
+    - echo $JAVA_HOME
+  retry: 2
+
+.cache:
+  cache:
+    key: "${CI_PROJECT_ID}_${CI_COMMIT_REF_NAME}"
+    policy: pull-push
+    paths:
+      - .gradle
+commit-lint:
+  stage: lint
+  extends:
+    - .commit-lint
+
+helm-lint:
+  stage: lint
+  extends:
+    - .helm_lint_template
+  tags:
+    - asf-eks-oneapp-dev
+
+build:
+  stage: build
+  needs: [commit-lint, helm-lint]
+#  variables:
+#    SECURE_LOG_LEVEL: "debug"
+  script:
+    - ./gradlew $GRADLE_OPTIONS clean build -x test
+  artifacts:
+    paths:
+      - build
+    expire_in: 30 mins
+  extends:
+    - .cache
+  tags:
+    - asf-eks-my-dev
+
+sonarqube:
+  extends:
+    - .cache
+    - .sonarqube_template
+  only:
+    - develop
+    - tags
+    - main
+    - testable
+    - sonarqube
+    - /^(epic|hotfix|feature)\/(MPF|DOT)-\d{3,}.+$/
+  tags:
+    - asf-eks-my-dev
+test:
+  stage: test
+  needs: [ build ]
+  before_script:
+    - chmod +x gradlew && export GRADLE_USER_HOME=`pwd`/.gradle
+  script:
+    - ./gradlew $GRADLE_OPTIONS test -x build -x compileJava --info
+    - echo 'JACOCO_REPORT_LOCATION $JACOCO_REPORT_LOCATION'
+    - awk -F"," '{ instructions += $4 + $5; covered += $5 } END { print covered, "/", instructions, " instructions covered"; printf "%s", "Total "; printf "%.0f", (100*covered/instructions); print "%" }' $JACOCO_REPORT_LOCATION
+  artifacts:
+    when: always
+    reports:
+      junit: build/test-results/test/TEST-*.xml
+    paths:
+      - build/reports/jacoco
+  extends:
+    - .cache
+  tags:
+    - asf-eks-my-dev
+
+code_quality:
+  stage: test
+  extends:
+    - .code_quality_template
+  tags:
+    - asf-eks-my-dev
+
+dependency_scanning:
+  tags:
+    - otc_run_docker_m
+
+secret_detection:
+  variables:
+    SECRET_DETECTION_HISTORIC_SCAN: "false"
+  tags:
+    - otc_run_docker_m
+
+sast:
+  tags:
+    - otc_run_docker_m
+build-image:
+  stage: publish
+  needs:
+    - job: build
+    - job: test
+    - job: helm-lint
+    - job: secret_detection
+      optional: true
+  extends:
+    - .build_publish_image
+  tags:
+    - otc_run_docker_m
+
+autoversion:
+  stage: versioning
+  needs: [ build-image ]
+  extends:
+    - .autoversion
+  only:
+    - /^master$|^main$/
+
+snapshot:
+  stage: versioning
+  needs: [ build-image ]
+  extends:
+    - .snapshot
+  only:
+    - /^(hotfix)\/(MPF|DOT)-\d{3,}$/
+
+current_version:
+  stage: versioning
+  needs: [ build-image ]
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - echo "TAG=${CI_COMMIT_TAG}" >> variables.env
+  artifacts:
+    reports:
+      dotenv: variables.env
+
+push-tag:
+  stage: versioning
+  needs:
+    - job: current_version
+      optional: true
+      artifacts: true
+    - job: autoversion
+      optional: true
+      artifacts: true
+    - job: snapshot
+      optional: true
+      artifacts: true
+  extends:
+    - .push_tag
+  tags:
+    - otc_run_docker_m
+  only:
+    - main
+    - tags
+    - /^(hotfix)\/(MPF|DOT)-\d{3,}$/
+
+sign-image:
+  stage: sign
+  needs:
+    - job: build-image
+    - job: push-tag
+      optional: true
+  extends:
+    - .sign_image_otc
+
+sign-image-tag:
+  stage: sign
+  needs:
+    - job: push-tag
+    - job: autoversion
+      artifacts: true
+      optional: true
+    - job: current_version
+      optional: true
+      artifacts: true
+    - job: snapshot
+      artifacts: true
+      optional: true
+  variables:
+    IMAGE_VERSION: $TAG
+  extends:
+    - .sign_image_otc
+  only:
+    - main
+    - tags
+    - /^(hotfix)\/(MPF|DOT)-\d{3,}$/
+
+deploy-dynamic-dev:
+  stage: staging
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-${CI_ENVIRONMENT_NAME}.myapp.uat.myhost.com'
+  extends:
+    - .deploy_chart
+  tags:
+    - asf-eks-my-dev
+  environment:
+    name: dev
+    url: $INGRESS_HOST
+    on_stop: remove-dynamic-dev
+  when: manual
+  only:
+    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
+
+Grafana-K6:
+  stage: loadtesting
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-${CI_ENVIRONMENT_NAME}.myapp.uat.myhost.com'
+  extends:
+    - .k6_loadtesting
+  when: manual
+  only:
+    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
+  needs: [ deploy-dynamic-dev ]
+
+remove-dynamic-dev:
+  stage: staging
+  extends:
+    - .remove_chart
+  tags:
+    - asf-eks-my-dev
+  environment:
+    name: dev
+    action: stop
+  when: manual
+  only:
+    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
+
+deploy-dev:
+  stage: staging
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+  extends:
+    - .deploy_chart
+    - .auto_notification_deployment_template
+  tags:
+    - asf-eks-oneapp-dev
+  environment:
+    name: dev
+    url: $INGRESS_HOST
+  only:
+    - develop
+
+deploy-dynamic-test-stable:
+  stage: staging
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-${CI_ENVIRONMENT_NAME}.myapp.uat.myhost.com'
+  extends:
+    - .deploy_chart
+  tags:
+    - uat
+  environment:
+    name: test-stable
+    url: $INGRESS_HOST
+    on_stop: remove-dynamic-test-stable
+  when: manual
+  only:
+    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
+
+remove-dynamic-test-stable:
+  stage: staging
+  extends:
+    - .remove_chart
+  tags:
+    - uat
+  environment:
+    name: test-stable
+    action: stop
+  when: manual
+  only:
+    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
+
+deploy-dev-caas:
+  stage: staging
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}-caas'
+  extends:
+    - .deploy_chart_caas
+  environment:
+    name: dev
+    url: $INGRESS_HOST
+  only:
+    - develop
+
+deploy-test-stable:
+  stage: staging
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}.myapp.uat.myhost.com'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+  extends:
+    - .deploy_chart
+  tags:
+    - uat
+  environment:
+    name: test-stable
+    url: $INGRESS_HOST
+  only:
+    - develop
+
+deploy-uat:
+  stage: staging
+  dependencies: [ autoversion ]
+  needs:
+    - job: sign-image-tag
+    - job: autoversion
+      artifacts: true
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+    IMAGE_VERSION: $TAG
+  extends:
+    - .deploy_chart
+  tags:
+    - uat
+  environment:
+    name: uat
+    url: $INGRESS_HOST
+  only:
+    - main
+
+deploy-prod-ref:
+  stage: pre-production
+  dependencies: [ current_version, snapshot ]
+  needs:
+    - job: sign-image-tag
+    - job: snapshot
+      artifacts: true
+      optional: true
+    - job: current_version
+      optional: true
+      artifacts: true
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+    IMAGE_VERSION: $TAG
+  extends:
+    - .deploy_chart
+  tags:
+    - prod-ref
+  environment:
+    name: prod-ref
+    url: $INGRESS_HOST
+  only:
+    - tags
+    - /^(hotfix)\/(ONEAPP|DOT)-\d{3,}$/
+
+deploy-prod:
+  stage: production
+  dependencies: [ current_version, snapshot ]
+  needs:
+    - job: sign-image-tag
+    - job: deploy-prod-ref
+    - job: current_version
+      optional: true
+      artifacts: true
+    - job: snapshot
+      optional: true
+      artifacts: true
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
+    IMAGE_VERSION: $TAG
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}'
+  extends:
+    - .deploy_chart
+  tags:
+    - uat # fixme: set dev for testing, please change to prod
+  environment:
+    name: uat # fixme: set dev for testing, please change to prod
+    url: $INGRESS_HOST
+  only:
+    - tags
+    - /^(hotfix)\/(MYAPP|DOP)-\d{3,}$/
+
+deploy-canary-prod:
+  stage: production
+  dependencies: [ current_version, snapshot ]
+  needs:
+    - job: sign-image-tag
+    - job: deploy-prod-ref
+    - job: current_version
+      optional: true
+      artifacts: true
+    - job: snapshot
+      optional: true
+      artifacts: true
+  variables:
+    CANARY_ENABLED: "true"
+    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.uat.myhost.com'
+    IMAGE_VERSION: $TAG
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-canary'
+  extends:
+    - .deploy_chart
+  tags:
+    - uat # fixme: set dev for testing, please change to prod
+  environment:
+    name: uat # fixme: set dev for testing, please change to prod
+    url: $INGRESS_HOST
+  only:
+    - tags
+    - /^(hotfix)\/(MYAPP|DOP)-\d{3,}$/
+
+rollback-prod:
+  stage: rollback
+  extends:
+    - .rollback
+  needs:
+    - job: deploy-prod
+  tags:
+    - asf-eks-oneapp-dev
+  only:
+    - tags
+    - /^(hotfix)\/(MYAPP|DOP)-\d{3,}$/
+
+
+
+#  rules:
+#    - if: $CI_COMMIT_TAG
+#      when: never
+#    - if: $CI_COMMIT_BRANCH == "main" #$CI_DEFAULT_BRANCH
+
+release-uat:
+  stage: release
+  dependencies: [ autoversion ]
+  needs:
+    - job: deploy-uat
+    - job: autoversion
+      artifacts: true
+  extends:
+    - .release-uat
+  only:
+    - main
+
+release-prod:
+  stage: release
+  dependencies: [ current_version ]
+  needs:
+    - job: deploy-prod
+    - job: current_version
+      artifacts: true
+  extends:
+    - .release-prod
+  only:
+    - tags
+
+release-canary-prod:
+  stage: release
+  dependencies: [ current_version ]
+  needs:
+    - job: deploy-canary-prod
+    - job: current_version
+      artifacts: true
+  extends:
+    - .release-prod
+  only:
+    - tags
+
+
+changelog:
+  stage: changelog
+  needs:
+    - job: release-uat
+  extends:
+    - .changelog
+  only:
+    - main
+
+#auto_notification_deployment:
+#  stage: notification
+#  needs: [ deploy-dynamic-dev ]
+#  allow_failure: true
+#  extends:
+#    - .auto_notification_deployment_template
+#  rules:
+#    - if: $CI_PIPELINE_SOURCE != "merge_request_event"
+#      when: never
+#    - when: always
