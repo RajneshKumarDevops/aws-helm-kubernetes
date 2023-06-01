@@ -1,0 +1,28 @@
+{{- if and .Values.grafana.enabled .Values.grafana.serviceMonitor.selfMonitor }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Values.service.name }}-service-monitor{{ .Values.canary.suffix }}
+  labels:
+    app: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+    dot.de/service: {{ .Chart.Name }}
+    dot.de/team: {{ .Values.team.name }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+  endpoints:
+    - port: {{ .Values.grafana.service.portName }}
+      {{- if .Values.grafana.serviceMonitor.interval }}
+      interval: {{ .Values.grafana.serviceMonitor.interval }}
+      {{- end }}
+      path: {{ .Values.grafana.serviceMonitor.path | quote }}
+  {{- if .Values.grafana.serviceMonitor.metricRelabelings }}
+metricRelabelings:
+  {{ tpl (toYaml .Values.grafana.serviceMonitor.metricRelabelings | indent 6) . }}
+  {{- end }}
+  {{- if .Values.grafana.serviceMonitor.relabelings }}
+relabelings:
+  {{ toYaml .Values.grafana.serviceMonitor.relabelings | indent 6 }}
+  {{- end }}
+  {{- end }}
