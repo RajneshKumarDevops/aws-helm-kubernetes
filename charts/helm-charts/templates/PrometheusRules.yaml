@@ -1,0 +1,28 @@
+{{- if .Values.rules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+    version: {{ .Values.image.tag }}
+    dot.de/service: {{ .Chart.Name }}
+    dot.de/team: {{ .Values.team.name }}
+  name: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+spec:
+  groups:
+  - name: {{ .Values.service.name }}{{ .Values.canary.suffix }}
+    rules:
+    {{- range .Values.rules.spec }}
+    - alert: {{ .alert }}
+      {{- with .annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      expr: {{ tpl .expr $ }}
+      for: {{ .interval }}
+      {{- with .labels }}
+      labels:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
+{{ end }}
