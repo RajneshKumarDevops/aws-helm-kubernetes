@@ -1,25 +1,79 @@
 kind: ConfigMap
 apiVersion: v1
 metadata:
-  name: {{ .Chart.Name }}-configmap{{ .Values.canary.suffix }}
+  name: {{ .Values.service.name }}-configmap{{ .Values.canary.suffix }}
   labels:
     dot.de/service: {{ .Chart.Name }}
     dot.de/team: {{ .Values.team.name }}
 data:
-  application.yaml: |-
-    server:
-      port: {{ .Values.service.port }}
-    spring:
-      profile:
-        active: {{ .Values.environment.name }}
-      application:
-        name: {{ .Values.service.name }}
-    test:
-      password: ${SECRET_PASSWORD:unknown}
-    logging:
-      level:
-        org:
-          springframework:
-            web: {{ .Values.logging.level.org.springframework.web }}
-          hibernate:
-            SQL: {{ .Values.logging.level.org.hibernate.SQL }}
+  ######### Application ###########
+    SPRING_APPLICATION_NAME: {{ .Values.service.name  | quote }}
+    SPRING_PROFILES_ACTIVE: {{ .Values.profiles.active | quote }}
+    SERVER_PORT: {{ .Values.service.port  | quote }}
+    ENVIRONMENT_NAME: {{ .Values.environment.name  | quote }}
+    ENVIRONMENT_INFO: {{ .Values.environment.name  | quote }}
+    TRACING_COLLECTOR_URL: {{ .Values.zipkin.tracing.endpoint | quote }}
+    TRACING_ENABLED: {{ .Values.tracing.enabled | quote }}
+  ############  AWS REGION  ##############
+    AWS_REGION: {{ .Values.aws.region | quote }}
+  ###########   JAVA  #############
+    JAVA_ENABLE_DEBUG: {{ .Values.image.debug.enabled | quote }}
+    JAVA_DEBUG_PORT: {{ .Values.image.debug.port | toString | quote }}
+    JAVA_OPTIONS_EXT: "-Xms{{ .Values.environment.resources.xms }} -Xmx{{ .Values.environment.resources.xmx }} -XX:+AlwaysPreTouch -XX:+UseStringDeduplication -XX:+UseG1GC"
+    ###########   Mongo Db #############
+    MONGODB_DB_NAME: {{ .Values.mongodb.db | quote }}
+    MONGO_ENV: {{ .Values.mongodb.isLocal | quote}}
+    ##########  Security  ###########
+    JWT_ISSUER_URI: {{ .Values.security.oauth2.resourceserver.jwt.issuerUri  | quote }}
+    JWT_JWK_SET_URI: {{ .Values.security.oauth2.resourceserver.jwt.jwkSetUri | quote }}
+    AUTH_GRANT_TYPE_STARGATE: {{ .Values.security.oauth2.client.registration.stargateClient.authGrantType | quote }}
+    STARGATE_CLIENT_PROVIDER: {{ .Values.security.oauth2.client.registration.stargateClient.provider | quote }}
+    TOKEN_URI: {{ .Values.security.oauth2.client.provider.stargateClient.tokenUri | quote }}
+    TOKEN_EXPIRATION_THRESHOLD_STARGATE: {{ .Values.security.oauth2.client.provider.stargateClient.tokenExpirationThreshold | quote }}
+    REVERSE_TOKEN: {{ .Values.security.oauth2.client.provider.stargateClient.reverseToken | quote }}
+
+    ORDER_TRACKER_TOKEN_URI: {{ .Values.security.oauth2.client.provider.orderTrackerClient.tokenUri | quote }}
+    TOKEN_EXPIRATION_THRESHOLD_ORDER_TRACKER: {{ .Values.security.oauth2.client.provider.orderTrackerClient.tokenExpirationThreshold | quote }}
+    ORDER_TRACKER_REVERSE_TOKEN: {{ .Values.security.oauth2.client.provider.orderTrackerClient.reverseToken | quote }}
+
+    ##########  Security  orderTrackerClient ###########
+    AUTH_GRANT_TYPEJWT_ISSUER_URI: {{ .Values.security.oauth2.client.orderTrackerClient.authorizationGrantType | quote }}
+    ######################## Zeeebe Gateway #########################
+    ZEEBE_GW_URI: {{ .Values.zeebe.client.broker.gatewayAddress | quote }}
+    ZEEBE_WORKER_THREADS: {{ .Values.zeebe.client.worker.thread | quote }}
+    ######################## Camunda Operate #########################
+    OPERATE_CLIENT_URL: {{ .Values.camunda.operate.operateUrl | quote }}
+    OPERATE_CLIENT_KEYCLOAK_URL: {{ .Values.camunda.operate.keycloakRealm | quote }}
+    OPERATE_CLIENT_KEYCLOAK_REALM: {{ .Values.camunda.operate.keycloakUrl | quote }}
+    ######################## Apps Loging #########################
+    APP_LOGGING_SENSITIVE: {{ .Values.app.logging.sensitive | quote }}
+    APP_LOGGING_JSON: {{ .Values.app.logging.json | quote }}
+    APP_LOGGING_MASKALL: {{ .Values.app.logging.maskAll | quote }}
+    APP_LOGGING_MASKEDURI: {{ .Values.app.logging.maskedUri | quote }}
+    APP_LOGGING_MASKEDPARAMS: {{ .Values.app.logging.maskedParams | quote }}
+    APP_LOGGING_MASKEDHEADERS: {{ .Values.app.logging.maskedHeaders | quote }}
+    ENABLE_LOG_MASKING: {{ .Values.camunda.logger.enableMasking | quote }}
+    ENABLE_CONSOLE_LOGGING: {{ .Values.camunda.logger.consoleLogging | quote }}
+    LOGGING_STYLE: {{ .Values.camunda.logger.consoleLoggerStyle | quote }}
+    FEIGN_LOGGER_TYPE: {{ .Values.camunda.logger.feign.loggerType | quote }}
+    FEIGN_CONSOLE_LOGGING: {{ .Values.camunda.logger.feign.consoleLogging | quote }}
+    ENABLE_PRETTY_PRINT: {{ .Values.camunda.logger.enablePrettyPrint | quote }}
+    ######################## Event store #########################
+    EVENT_STORE_URI: {{ .Values.apiClients.eventStore.basePath | quote }}
+    CRM_ROUTING_URI: {{ .Values.apiClients.crmRouting.basePath | quote }}
+    PRODUCT_INVENTORY_URI: {{ .Values.apiClients.carmenProductInventoryManagement.basePath | quote }}
+    PARTY_MGMNT_URI: {{ .Values.apiClients.carmenPartyManagement.basePath | quote }}
+    ORDER_TRACKER_URI: {{ .Values.apiClients.orderTrackerDPS.basePath | quote }}
+    ORDER_TRACKER_STATUS: {{ .Values.orderTrackerDPS.enabled | quote }}
+    ESIM_ACTIVATION_PRODUCT_ORDER: {{ .Values.apiClients.eSimActivationProductOrder.basePath | quote }}
+
+    AUTH_GRANT_TYPE_ORDER_TRACKER: {{ .Values.security.oauth2.client.orderTrackerClient.authorizationGrantType | quote }}
+    ORDER_TRACKER_PROVIDER: {{ .Values.security.oauth2.client.orderTrackerClient.provider | quote }}
+    ORDER_TRACKER_REG_ID: {{ .Values.security.oauth2.client.orderTrackerClient.registrationId | quote }}
+    ######################## Retry Timing #########################
+    RETRY_TIME_IN_MINUTES: {{ .Values.retryTiming.timeInMinutes | quote }}
+    FIRST_RETRY_TIME: {{ .Values.retryTiming.firstRetryTime | quote }}
+    SECOND_RETRY_TIME: {{ .Values.retryTiming.secondRetryTime | quote }}
+    THIRD_RETRY_TIME: {{ .Values.retryTiming.thirdRetryTime | quote }}
+    FOURTH_RETRY_TIME: {{ .Values.retryTiming.fourthRetryTime | quote }}
+    FIFTH_RETRY_TIME: {{ .Values.retryTiming.fifthRetryTime | quote }}
