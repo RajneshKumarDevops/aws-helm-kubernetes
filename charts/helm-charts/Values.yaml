@@ -1,72 +1,110 @@
 team:
-  name: "TeamName"
-
-rbac:
-  enabled: false
-rbacProd:
-  enabled: false
-
+  name: "technocrats"
+aws:
+  region: "eu-central-1"
 image:
-  name: "Imagepath"
+  name: "mtr.devops.telekom.de/oneapp/pom-new-acquisition-mobile-process"
   tag: "latest"
   debug:
     port: 5005
     enabled: true
-
-canary:
-  enabled: false
-  suffix: ""
-
-service:
-  type: ClusterIP
-  port: 8080
-  name: service-name
-
-ingress:
-  enabled: true
-  host: ingress-host-name
-  paths:
-      - /(|$)(.*)
-
+info:
+  annotations: { ## This should be arbitrary information about the service
+    dot.de/notificationUrl: "webexteams://im?space=960885a0-ee62-11ed-8348-fbaa3731f709",
+  }
+  labels: { ### Can only hold alphanumeric [a-z] and _ or - and has max 63 characters!
+    dot.de/team: "technocrats",
+    dot.de/service: "pom-new-acquisition-mobile-process"
+  }
 environment:
-  name: "dev"
+  name: dev
   replicas:
     quantity: 1
   resources:
     xmx: 700M
     xms: 200M
     requests:
-      memory: "800Mi"
-      cpu: "100m"
+      memory: "500Mi"
+      cpu: "400m"
     limits:
-      memory: "2Gi"
-      cpu: "2"
-
-keda:
-  enabled: false
-
+      memory: "1Gi"
+      cpu: "1"
 serviceAccount:
   enabled: true
-  roleARN: arn:aws:iam::***
+  name: pom-new-acquisition-mobile-process-dev
+  roleARN: arn:aws:iam::274765082782:role/pom-new-acquisition-mobile-process-dev
+sa:
+  name: pom-new-acq-sa
+secret:
+  enabled: true
+  name: oneapp-pom-new-acquisition-mobile-process-dev
+  arn: arn:aws:secretsmanager:eu-central-1:274765082782:secret:oneapp-pom-new-acquisition-mobile-process-dev-JFRaXM
 pullsecret:
   enabled: true
-  name: oneapp-pull-secret
-
-secretstore:
+  name: oneapp-pull-secret-v2
+rbac:
   enabled: false
-
+rbacProd:
+  enabled: false
+secretstore:
+  enabled: true
+profiles:
+  active: default
+keda:
+  enabled: false
+service:
+  type: ClusterIP
+  port: 8080
+  name: pom-new-acquisition-mobile-process
+canary:
+  enabled: false
+  suffix: ""
+# Tracing Config values #########################
+tracing:
+  enabled: false
+  sampling:
+    probability: 1.0
+zipkin:
+  tracing:
+    endpoint: https://collector-zipkin-http-drax-guardians.live.dhei.telekom.de:443/api/v2/spans
+###############################################################
+# Apps log enabling
+###############################################################
+app:
+  logging:
+    sensitive: true
+    json: true
+    maskAll: true
+    maskedUri: true
+    maskedParams: searchParam
+    maskedHeaders: authorization, x-user-authentication
+    level: DEBUG
+###############################################################
+# Mongo Db Configuration
+###############################################################
+mongodb:
+  db: pom-new-acquisition-mobile-process-dev
+  isLocal: false
 autoscaling:
   enabled: false
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
-
-# jaeger:
-#   image:
-#     name: Imagename
-#     version: 1.17.1
-#   host: Host:443
-
+ingress:
+  enabled: true
+  paths:
+      - /(|$)(.*)
+application:
+  name: pom-new-acquisition-mobile-process
+strategy:
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 2
+jaeger:
+  image:
+    name: mtr.devops.telekom.de/oneapp/jaeger-agent
+    version: 1.17.1
+  host: collector-grpc-drax-guardians.live.dhei.telekom.de:443
 grafana:
   enabled: true
   defaultDashboardsEnabled: true
@@ -76,23 +114,9 @@ grafana:
   serviceMonitor:
     interval: 15s
     selfMonitor: true
-    path: "/actuator/prometheus"
+    path: "/new-mobile-acquisition/v1/actuator/prometheus"
     metricRelabelings: []
     relabelings: []
-
-logging:
-  level:
-    org:
-      hibernate:
-        SQL: OFF
-      springframework:
-        web: INFO
-
-label:
-  validDays: 180
-  manualDeletionEnabled: ${MANUAL_DELETION_ENABLED:true}
-
-
 dynatrace:
   enabled: true
   oneagent:
@@ -105,13 +129,141 @@ dynatrace:
   labels:
     appNameDarwin: "MMA_2.0"
     operationMode: "Development"
-
-#mongodb:
-#  uri: mongodb+srv://USERNAME:PASSWORD@service-test-pl-0.ttq7r.mongodb.net/?authSource=%24external&authMechanism=MONGODB-AWS&retryWrites=true&w=majority
-#  db: mpf-mobile-acquisition-service
-#  isLocal: false
-#  autodelete:
-#    enabled: true
-
 rules:
   enabled: false
+######## Secret reloader ########
+reloader:
+  secrets:
+    enabled: true
+    list:
+      - "{{ .Values.pullsecret.name }}"
+      - "{{ .Values.service.name }}-configmap"
+  configmaps:
+    enabled: true
+    list:
+      - "{{ .Values.service.name }}-configmap"
+######## APPLICATION Rover SECURITY ########
+security:
+  oauth2:
+    resourceserver:
+      jwt:
+        issuerUri: https://stargate-playground.live.dhei.telekom.de/auth/realms/default
+        jwkSetUri: https://stargate-playground.live.dhei.telekom.de/auth/realms/default/protocol/openid-connect/certs
+    client:
+      registration:
+        stargateClient:
+          authGrantType: client_credentials
+          client-id: ${CLIENT_ID}
+          client-secret: ${CLIENT_SECRET}
+          tokenUri:  https://iris.qa.dhei.telekom.de/auth/realms/cit2/protocol/openid-connect/token
+          provider: stargate-client
+          tokenExpirationThreshold: 60
+      orderTrackerClient:
+        authorizationGrantType: client_credentials
+        clientId: ${ORDER_TRACKER_CLIENT_ID}
+        clientSecret: ${ORDER_TRACKER_CLIENT_SECRET}
+        provider: order-tracker-client
+        registrationId: order-tracker-client
+      provider:
+        stargateClient:
+          tokenUri: https://iris.qa.dhei.telekom.de/auth/realms/cit2/protocol/openid-connect/token
+          tokenExpirationThreshold: 60
+          reverseToken: false
+        orderTrackerClient:
+          tokenUri: https://eshop-oneshop-api.uat.eshop.yo-digital.com/gateway/eshop/openid-connect/v1/token
+          tokenExpirationThreshold: 60
+          reverseToken: false
+# feign clients properties ######################
+apiClients:
+  eventStore:
+    basePath: https://stargate.qa.dhei.telekom.de/cit4/dot/eventstore/v1/
+    authorizationInterceptorBean: starGateAuthInjector
+    loggerBean: feignLogger
+  carmenPartyManagement:
+    basePath: https://stargate.qa.dhei.telekom.de/cit4/digihu-mob/PartyManagement/v1
+    authorizationInterceptorBean: starGateAuthInjector
+    loggerBean: feignLogger
+  carmenProductInventoryManagement:
+    basePath: https://stargate.qa.dhei.telekom.de/cit4/digihu-mob/ProductInventoryManagement/v1/
+    authorizationInterceptorBean: starGateAuthInjector
+    loggerBean: feignLogger
+  orderTrackerDPS:
+    basePath: https://eshop-oneshop-api.uat.eshop.yo-digital.com/gateway/eshop/productOrdering/v3
+    authorizationTnterceptorBean: orderTrackerDPSAuthInjector
+    loggerBean: feignLogger
+  crmRouting:
+    basePath: https://stargate.qa.dhei.telekom.de/cit4/digihu-mob/CrmRouting/v1
+    name: crmrouting-client
+  eSimActivationProductOrder:
+    basePath: https://stargate.qa.dhei.telekom.de/cit4/digihu-mob/esim-activation-product-order/api/v1
+    authorizationInterceptorBean: starGateAuthInjector
+    loggerBean: feignLogger
+idm:
+    hostUrl: https://accounts.login00.idm.ver.sul.t-online.de
+    oauthTokenUrl: /oauth2/tokens
+    oauthCertsUrl: /oauth2/v1/certs
+    secretLocal: false
+    stargateEnabled: true
+    encryptionEnabled: true
+    validationEnabled: true
+    issuerUrl: https://accounts.login00.idm.ver.sul.t-online.de
+    audUrl: https://hal.api.telekom.de
+    idmRequestPathUrl: /acq-mobile/v1
+    skipGatewayToken: false
+############### CAMUNDA CONFIGURATION ############
+camunda:
+  processId: pom-new-mobile-acquisition-business-process
+  logger:
+    enabled: true
+    enableMasking: true
+    consoleLogging: true
+    consoleLoggerStyle: JSON
+    enablePrettyPrint: false
+    fieldPath:
+      correlationId: "variables.headers.x-request-tracking-id"
+      channelId: "variables.productOrder.channel.id"
+    maskedFields:
+      -  de.telekom.pom.businessprocess.productordering.model.RelatedPartyRef:id?role=owner
+      -  de.telekom.pom.businessprocess.productordering.model.TargetScope:id?entityBaseType=Product
+    maskedHeaders:
+      - authorization
+    filter:
+      excludedPaths:
+        - /new-mobile-acquisition/v1/actuator
+        - /new-mobile-acquisition/v1/swagger-ui
+        - /new-mobile-acquisition/v1/v3/api-docs
+        - /new-mobile-acquisition/v1/v2/api-docs
+        - /new-mobile-acquisition/v1/api-docs
+        - /new-mobile-acquisition/v1/error
+    feign:
+      loggerType: NON_SENSITIVE
+      consoleLogging: true
+  operate:
+    operateUrl: https://camunda.oneapp.dev.hal.telekom.de
+    clientId: ${OPERATE_CLIENT_ID}
+    clientSecret: ${OPERATE_CLIENT_SECRET}
+    keycloakUrl: https://keycloak.oneapp.dev.hal.telekom.de
+    keycloakRealm: camunda-platform
+# Zeebe gateway properties ######################
+zeebe:
+  client:
+    broker:
+      gatewayAddress: camunda-platform-zeebe-gateway.camunda.svc.cluster.local:26500
+    security:
+      plaintext: true
+    worker:
+      thread: 1
+#################################################
+eiMessage:
+  timeLeft : 49999
+  priority : 4
+  sender : sndr:tmd.crm.omsoe.architecture.OMSOE:OE
+orderTrackerDPS:
+  enabled : false
+retryTiming:
+  timeInMinutes : false
+  firstRetryTime: 30
+  secondRetryTime: 20
+  thirdRetryTime: 15
+  fourthRetryTime: 10
+  fifthRetryTime: 5
