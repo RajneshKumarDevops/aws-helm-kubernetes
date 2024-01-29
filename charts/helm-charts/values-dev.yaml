@@ -1,30 +1,189 @@
-image:
-  name: "image-name"
-  tag: "latest"
-  debug:
-    port: 5005
-    enabled: true
-
+ingress:
+  host: "pom-new-acquisition-mobile-process.oneapp.dev.hal.telekom.de"
 environment:
   name: dev
   replicas:
-    quantity: 2
+    quantity: 1
   resources:
-    xmx: 1536M
-    xms: 768M
+    xmx: 700M
+    xms: 200M
     requests:
-      memory: "2Gi"
-      cpu: "2"
+      memory: "500Mi"
+      cpu: "400m"
     limits:
-      memory: "2Gi"
-      cpu: "2"
-
-canary:
-  enabled: true
-
-rbac:
-  enabled: true
-
+      memory: "1Gi"
+      cpu: "1"
 serviceAccount:
   enabled: true
-  roleARN: arn:aws:iam::**
+  name: pom-new-acquisition-mobile-process-dev
+  roleARN: arn:aws:iam::274765082782:role/pom-new-acquisition-mobile-process-dev
+secret:
+  enabled: true
+  name: oneapp-pom-new-acquisition-mobile-process-dev
+  arn: arn:aws:secretsmanager:eu-central-1:274765082782:secret:oneapp-pom-new-acquisition-mobile-process-dev-JFRaXM
+pullsecret:
+  enabled: true
+  name: oneapp-pull-secret-v2
+rbac:
+  enabled: false
+secretstore:
+  enabled: true
+profiles:
+  active: dev
+dynatrace:
+  enabled: true
+  annotations:
+    appNameDarwin: "MMA_2.0(D)"
+    operationMode: "Development"
+  labels:
+    appNameDarwin: "MMA_2.0"
+    operationMode: "Development"
+keda:
+  enabled: false
+  minReplicaCount: 3
+  maxReplicaCount: 8
+  pollingInterval: 15
+  cooldownPeriod: 300
+  threshold: 8
+# Tracing Config values #########################
+tracing:
+  enabled: true
+  sampling:
+    probability: 1.0
+zipkin:
+  tracing:
+    endpoint: https://collector-zipkin-http-drax-guardians.live.dhei.telekom.de:443/api/v2/spans
+###############################################################
+# Apps log enabling
+###############################################################
+app:
+  logging:
+    sensitive: true
+    json: true
+    maskAll: true
+    maskedUri: true
+    maskedParams: searchParam
+    maskedHeaders: authorization, x-user-authentication
+###############################################################
+# Mongo Db Configuration
+###############################################################
+mongodb:
+  db: pom-new-acquisition-mobile-process-dev
+  isLocal: false
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+security:
+  oauth2:
+    resourceserver:
+      jwt:
+       issuerUri: https://stargate-playground.live.dhei.telekom.de/auth/realms/default
+       jwkSetUri: https://stargate-playground.live.dhei.telekom.de/auth/realms/default/protocol/openid-connect/certs
+    client:
+      registration:
+        stargateClient:
+          authGrantType: client_credentials
+          client-id: ${CLIENT_ID}
+          client-secret: ${CLIENT_SECRET}
+          provider: stargate-client
+      orderTrackerClient:
+        authorizationGrantType: client_credentials
+        clientId: ${ORDER_TRACKER_CLIENT_ID}
+        clientSecret: ${ORDER_TRACKER_CLIENT_SECRET}
+        provider: order-tracker-client
+        registrationId: order-tracker-client
+      provider:
+        stargateClient:
+          tokenUri: https://iris.qa.dhei.telekom.de/auth/realms/cit2/protocol/openid-connect/token
+          tokenExpirationThreshold: 60
+          reverseToken: false
+        orderTrackerClient:
+          tokenUri: https://eshop-oneshop-api.uat.eshop.yo-digital.com/gateway/eshop/openid-connect/v1/token
+          tokenExpirationThreshold: 60
+          reverseToken: false
+# feign clients properties ######################
+apiClients:
+  eventStore:
+    basePath: https://stargate.qa.dhei.telekom.de/cit2/dot/eventstore/v1/
+    authorizationInterceptorBean: starGateAuthInjector
+    loggerBean: feignLogger
+  carmenPartyManagement:
+    basePath: https://stargate.qa.dhei.telekom.de/cit2/digihu-mob/PartyManagement/v1
+    authorizationInterceptorBean: starGateAuthInjector
+    loggerBean: feignLogger
+  carmenProductInventoryManagement:
+    basePath: https://stargate.qa.dhei.telekom.de/cit2/digihu-mob/ProductInventoryManagement/v1/
+    authorizationInterceptorBean: starGateAuthInjector
+    loggerBean: feignLogger
+  orderTrackerDPS:
+    basePath: https://eshop-oneshop-api.uat.eshop.yo-digital.com/gateway/eshop/productOrdering/v3
+    authorizationInterceptorBean: orderTrackerDPSAuthInjector
+    loggerBean: feignLogger
+  crmRouting:
+    basePath: https://stargate.qa.dhei.telekom.de/cit2/digihu-mob/CrmRouting/v1
+    name: crmrouting-client
+  eSimActivationProductOrder:
+    basePath: https://stargate.qa.dhei.telekom.de/cit2/digihu-mob/esim-activation-product-order/api/v1
+    authorizationInterceptorBean: starGateAuthInjector
+    loggerBean: feignLogger
+# Camunda properties ######################
+camunda:
+  processId: pom-new-mobile-acquisition-business-process
+  logger:
+    enabled: true
+    enableMasking: true
+    consoleLogging: true
+    consoleLoggerStyle: JSON
+    enablePrettyPrint: false
+    fieldPath:
+      correlationId: "variables.headers.x-request-tracking-id"
+      channelId: "variables.productOrder.channel.id"
+    maskedFields:
+      -  de.telekom.pom.businessprocess.productordering.model.RelatedPartyRef:id?role=owner
+      -  de.telekom.pom.businessprocess.productordering.model.TargetScope:id?entityBaseType=Product
+    maskedHeaders:
+      - authorization
+    filter:
+      excludedPaths:
+        - /new-mobile-acquisition/v1/actuator
+        - /new-mobile-acquisition/v1/swagger-ui
+        - /new-mobile-acquisition/v1/v3/api-docs
+        - /new-mobile-acquisition/v1/v2/api-docs
+        - /new-mobile-acquisition/v1/api-docs
+        - /new-mobile-acquisition/v1/error
+    feign:
+      loggerType: NON_SENSITIVE
+      consoleLogging: true
+  operate:
+    operateUrl: https://camunda.oneapp.dev.hal.telekom.de
+    clientId: ${OPERATE_CLIENT_ID}
+    clientSecret: ${OPERATE_CLIENT_SECRET}
+    keycloakUrl: https://keycloak.oneapp.dev.hal.telekom.de
+    keycloakRealm: camunda-platform
+################ Zeebe gateway properties ######################
+zeebe:
+  client:
+    broker:
+      gatewayAddress: camunda-platform-zeebe-gateway.camunda.svc.cluster.local:26500
+    security:
+      plaintext: true
+    worker:
+      thread: 5
+######################################
+eiMessage:
+  timeLeft : 49999
+  priority : 4
+  sender : sndr:tmd.crm.omsoe.architecture.OMSOE:OE
+orderTrackerDPS:
+  enabled : false
+retryTiming:
+  timeInMinutes : false
+  firstRetryTime: 30
+  secondRetryTime: 20
+  thirdRetryTime: 15
+  fourthRetryTime: 10
+  fifthRetryTime: 5
+encryption:
+  secretKey: ${POM_SECRET_KEY}
