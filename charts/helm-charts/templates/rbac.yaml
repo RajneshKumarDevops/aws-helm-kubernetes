@@ -1,0 +1,97 @@
+{{ if .Values.rbacProd.enabled  }} #For prod-ref and prod
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: admin{{ .Values.canary.suffix }}
+  labels:
+    dot.de/service: {{ .Chart.Name }}
+    dot.de/team: {{ .Values.team.name }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "watch", "list", "delete" ]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["networking.k8s.io", "networking.k8s.io/v1","extensions/v1beta1","networking.k8s.io/v1beta1"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["*" ]
+  - apiGroups: ["external-secrets.io/v1beta1","kubernetes-client.io/v1"]
+    resources: ["externalsecrets"]
+    verbs: ["get", "watch", "list" ]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "watch", "list", "patch" ]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["customresourcedefinitions"]
+    resourceNames: ["externalsecrets.kubernetes-client.io"]
+    verbs: ["get"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["prometheusrules"]
+    verbs: ["get", "watch", "list", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin{{ .Values.canary.suffix }}
+  labels:
+    dot.de/service: {{ .Chart.Name }}
+    dot.de/team: {{ .Values.team.name }}
+subjects:
+- kind: Group
+  name: oneapp-internal/oidc/{{ .Values.environment.name  }}/eks-clusters/oneapp/rbac/teams/{{ .Values.team.name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: admin{{ .Values.canary.suffix }}
+{{ end }}
+
+---
+{{- if .Values.dynatrace.enabled }}
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dynatrace-oneagent-metadata-viewer{{ .Values.canary.suffix }}
+  labels:
+{{ toYaml .Values.info.labels | indent 4 }}
+  annotations:
+{{ toYaml .Values.info.annotations | indent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dynatrace-oneagent-metadata-viewer-binding{{ .Values.canary.suffix }}
+  labels:
+{{ toYaml .Values.info.labels | indent 4 }}
+  annotations:
+{{ toYaml .Values.info.annotations | indent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: default
+    apiGroup: ""
+  ### You need to add the service account that your workload is using!
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name }}{{ .Values.canary.suffix }}
+    apiGroup: ""
+###
+roleRef:
+  kind: Role
+  name: dynatrace-oneagent-metadata-viewer{{ .Values.canary.suffix }}
+  apiGroup: ""
+{{- end }}

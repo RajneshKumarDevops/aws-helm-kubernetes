@@ -7,34 +7,20 @@ metadata:
     deploymentName: {{ .Values.service.name }}{{ .Values.canary.suffix }}
     dot.de/service: {{ .Chart.Name }}
     dot.de/team: {{ .Values.team.name }}
+
 spec:
-  cooldownPeriod: 30
   maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
   minReplicaCount: {{ .Values.keda.minReplicaCount }}
   pollingInterval:  {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
   scaleTargetRef:
     name: {{ .Values.service.name }}{{ .Values.canary.suffix }}
-  advanced:
-    horizontalPodAutoscalerConfig:
-      behavior:
-        scaleDown:
-          policies:
-          - periodSeconds: 15
-            type: Pods
-            value: 4
-          stabilizationWindowSeconds: 10
   triggers:
-  {{- range .Values.keda.triggers }}
-    - type: {{ .type }}
-      metricType: {{ .metricType }}
+    - type: prometheus
       metadata:
-      {{- if eq .type "prometheus" }}
-        serverAddress: {{ .serverAddress }}
-        metricName: {{ .metricName }}
-        threshold: {{ .threshold | squote }}
-        query: {{ tpl .query $ }}
-      {{- else }}
-        value: {{ .value | squote }}
-      {{- end }}
-  {{- end }}
+        metricName: rate_http_server_requests_seconds_count
+        metricType: AverageValue
+        query: sum(rate(http_server_requests_seconds_count{namespace="{{ .Release.Namespace }}"}[1m]))
+        serverAddress: http://victoria-metrics-victoria-metrics-cluster-vmselect.victoria-metrics.svc.cluster.local:8481/select/999/prometheus
+        threshold: "{{ .Values.keda.threshold }}"
 {{- end }}
