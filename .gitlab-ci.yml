@@ -1,84 +1,92 @@
 image: $DOCKER_WORKER_IMAGE
-
 variables:
+  DOCKER_IMAGE_VERSION: "$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
   IMAGE_NAME: $DOCKER_REGISTRY_URL/$CI_PROJECT_NAME
   IMAGE_VERSION: $CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA
   GRADLE_OPTIONS: --no-daemon -s --parallel --max-workers=2 --build-cache
+  DOCKER_RELEASE_IMAGE_VERSION: "$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
   SECURE_LOG_LEVEL: "info"
   SAST_JAVA_VERSION: 17
+  GIT_SUBMODULE_STRATEGY: recursive
   FAIL_NEVER: 1
   SAST_EXCLUDED_PATHS: "spec, test, tests, tmp, build.gradle, gradle"
   KUBESEC_HELM_CHARTS_PATH: "charts"
-  APPLICATION: my-service
+  APPLICATION: pom-new-acquisition-mobile-process
   JACOCO_REPORT_LOCATION: "build/reports/jacoco/test/jacocoTestReport.csv"
-
+  INTEG_REPORT_LOCATION: "build/reports/extentReport/IntegrationTestsResult.html"
+  DOCKER_DRIVER: overlay2
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+services:
+  - name: "mtr.devops.telekom.de/oneapp/docker:24.0.6-dind"
+    command: ['--tls=false', '--host=tcp://0.0.0.0:2375', '--registry-mirror=https://dockerhub.devops.telekom.de']
+    alias: docker
 workflow:
   rules:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH
-
 include:
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'docker/build-publish-image-clean.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'jib/build-jib.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'docker/sign-image.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'gradle/sonarqube-analysis.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'docker/push-tag.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'docker/snapshot.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'release/changelog.yaml'
     ref: 'master'
   - project: 'oneapp/apps/cicd-common'
     file: 'release/commitlint.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'release/autoversion.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'release/release-prod.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'release/release-uat.yaml'
+    ref: 'master'
+  - project: 'oneapp/apps/cicd-common'
+    file: 'docker/container-scanning.yaml'
     ref: 'master'
   - project: 'oneapp/apps/cicd-common'
     file: 'helm/build-and-publish.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'helm/rollback-deployment.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'helm/deploy-values.yaml'
     ref: 'master'
-  - project: 'my/apps/cicd-common'
-    file: 'code-quality/code-quality.yaml'
-    ref: 'master'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'helm/deploy-values-caas.yaml'
     ref: 'caas-dynatrace'
-  - project: 'my/apps/mobile/mpf/ci'
+  - project: 'oneapp/apps/mobile/mpf/ci'
     file: 'deployment-notification.yml'
     ref: 'main'
-  - project: 'my/apps/cicd-common'
+  - project: 'oneapp/apps/cicd-common'
     file: 'loadtest/k6-loadtesting.yaml'
     ref: 'master'
 #Gitlab Securuty scanning
   - template: Security/SAST.gitlab-ci.yml
   - template: Security/Secret-Detection.gitlab-ci.yml
   - template: Security/Dependency-Scanning.gitlab-ci.yml
-  - template: Security/SAST-IaC.gitlab-ci.yml
-  - template: Security/License-Scanning.gitlab-ci.yml
-
+  - template: Security/Container-Scanning.gitlab-ci.yml
+#  - template: Security/SAST-IaC.gitlab-ci.yml
+  - template: 'Code-Quality.gitlab-ci.yml'
 stages:
     - lint
     - build
@@ -94,7 +102,9 @@ stages:
     - rollback
     - release
     - changelog
-
+    - start-L2-uat
+    - canary-deployment
+    - mpf-release-deployment
 default:
   before_script:
     - chmod +x gradlew && export GRADLE_USER_HOME=`pwd`/.gradle
@@ -103,7 +113,6 @@ default:
     - echo $DOCKER_AUTH_CONFIG
     - echo $JAVA_HOME
   retry: 2
-
 .cache:
   cache:
     key: "${CI_PROJECT_ID}_${CI_COMMIT_REF_NAME}"
@@ -114,19 +123,17 @@ commit-lint:
   stage: lint
   extends:
     - .commit-lint
-
 helm-lint:
   stage: lint
   extends:
     - .helm_lint_template
   tags:
     - asf-eks-oneapp-dev
-
 build:
   stage: build
   needs: [commit-lint, helm-lint]
-#  variables:
-#    SECURE_LOG_LEVEL: "debug"
+  before_script:
+    - chmod +x gradlew && export GRADLE_USER_HOME=`pwd`/.gradle
   script:
     - ./gradlew $GRADLE_OPTIONS clean build -x test
   artifacts:
@@ -136,8 +143,15 @@ build:
   extends:
     - .cache
   tags:
-    - asf-eks-my-dev
-
+    - asf-eks-oneapp-dev
+bridge:
+  stage: start-L2-uat
+  needs: [deploy-uat]
+  trigger:
+      project: oneapp/apps/mobile/mpf/mpf-mobile-acquisition-automation
+      branch: main
+  only:
+      - main
 sonarqube:
   extends:
     - .cache
@@ -150,60 +164,53 @@ sonarqube:
     - sonarqube
     - /^(epic|hotfix|feature)\/(MPF|DOT)-\d{3,}.+$/
   tags:
-    - asf-eks-my-dev
-test:
-  stage: test
-  needs: [ build ]
-  before_script:
-    - chmod +x gradlew && export GRADLE_USER_HOME=`pwd`/.gradle
-  script:
-    - ./gradlew $GRADLE_OPTIONS test -x build -x compileJava --info
-    - echo 'JACOCO_REPORT_LOCATION $JACOCO_REPORT_LOCATION'
-    - awk -F"," '{ instructions += $4 + $5; covered += $5 } END { print covered, "/", instructions, " instructions covered"; printf "%s", "Total "; printf "%.0f", (100*covered/instructions); print "%" }' $JACOCO_REPORT_LOCATION
-  artifacts:
-    when: always
-    reports:
-      junit: build/test-results/test/TEST-*.xml
-    paths:
-      - build/reports/jacoco
-  extends:
-    - .cache
-  tags:
-    - asf-eks-my-dev
-
+    - asf-eks-oneapp-dev
 code_quality:
+  variables:
+    CODECLIMATE_PREFIX: dockerhub.devops.telekom.de/
   stage: test
-  extends:
-    - .code_quality_template
+  dependencies: [build]
   tags:
-    - asf-eks-my-dev
-
+    - otc_run_sysbox_m
 dependency_scanning:
+  stage: test
   tags:
     - otc_run_docker_m
-
 secret_detection:
+  stage: test
   variables:
     SECRET_DETECTION_HISTORIC_SCAN: "false"
   tags:
     - otc_run_docker_m
-
 sast:
+  stage: test
+  artifacts:
+    name: sast
+    paths:
+      - 'gl-sast-report.json'
+    reports:
+      sast: gl-sast-report.json
   tags:
     - otc_run_docker_m
+# kics-iac-sast:
+#   tags:
+#     - otc_run_docker_k8s_xl
 build-image:
   stage: publish
   needs:
     - job: build
-    - job: test
     - job: helm-lint
     - job: secret_detection
       optional: true
   extends:
-    - .build_publish_image
+    - .build_jib
   tags:
     - otc_run_docker_m
-
+container_scanning:
+  stage: scanning
+  needs: [ build-image ]
+  tags:
+    - otc_run_docker_m
 autoversion:
   stage: versioning
   needs: [ build-image ]
@@ -211,7 +218,6 @@ autoversion:
     - .autoversion
   only:
     - /^master$|^main$/
-
 snapshot:
   stage: versioning
   needs: [ build-image ]
@@ -219,7 +225,6 @@ snapshot:
     - .snapshot
   only:
     - /^(hotfix)\/(MPF|DOT)-\d{3,}$/
-
 current_version:
   stage: versioning
   needs: [ build-image ]
@@ -230,7 +235,6 @@ current_version:
   artifacts:
     reports:
       dotenv: variables.env
-
 push-tag:
   stage: versioning
   needs:
@@ -246,12 +250,11 @@ push-tag:
   extends:
     - .push_tag
   tags:
-    - otc_run_docker_m
+    - otc_run_sysbox_l # This is the new runner was replaced the old content: otc_run_docker_m
   only:
     - main
     - tags
     - /^(hotfix)\/(MPF|DOT)-\d{3,}$/
-
 sign-image:
   stage: sign
   needs:
@@ -260,7 +263,6 @@ sign-image:
       optional: true
   extends:
     - .sign_image_otc
-
 sign-image-tag:
   stage: sign
   needs:
@@ -282,16 +284,16 @@ sign-image-tag:
     - main
     - tags
     - /^(hotfix)\/(MPF|DOT)-\d{3,}$/
-
 deploy-dynamic-dev:
   stage: staging
   needs: [ sign-image ]
   variables:
-    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-${CI_ENVIRONMENT_NAME}.myapp.uat.myhost.com'
+    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
   extends:
     - .deploy_chart
+    - .auto_notification_dev_test_deployment_template
   tags:
-    - asf-eks-my-dev
+    - asf-eks-oneapp-dev
   environment:
     name: dev
     url: $INGRESS_HOST
@@ -299,40 +301,44 @@ deploy-dynamic-dev:
   when: manual
   only:
     - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
-
-Grafana-K6:
-  stage: loadtesting
-  variables:
-    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-${CI_ENVIRONMENT_NAME}.myapp.uat.myhost.com'
-  extends:
-    - .k6_loadtesting
-  when: manual
-  only:
-    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
-  needs: [ deploy-dynamic-dev ]
-
 remove-dynamic-dev:
   stage: staging
   extends:
     - .remove_chart
+    - .auto_notification_remove_dynamic_deployment
   tags:
-    - asf-eks-my-dev
+    - asf-eks-oneapp-dev
   environment:
     name: dev
     action: stop
   when: manual
   only:
+    -  /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
+deploy-development:
+  stage: staging
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+  extends:
+    - .deploy_chart
+    - .auto_notification_dev_test_deployment_template
+  tags:
+    - asf-eks-oneapp-dev
+  environment:
+    name: dev
+    url: $INGRESS_HOST
+  only:
     - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
-
 deploy-dev:
   stage: staging
   needs: [ sign-image ]
   variables:
-    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
     HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
   extends:
     - .deploy_chart
-    - .auto_notification_deployment_template
+    - .auto_notification_dev_test_deployment_template
   tags:
     - asf-eks-oneapp-dev
   environment:
@@ -340,80 +346,88 @@ deploy-dev:
     url: $INGRESS_HOST
   only:
     - develop
-
-deploy-dynamic-test-stable:
-  stage: staging
+deploy-canary-dev:
+  stage: canary-deployment
   needs: [ sign-image ]
   variables:
-    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-${CI_ENVIRONMENT_NAME}.myapp.uat.myhost.com'
+    CANARY_ENABLED: "true"
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    IMAGE_VERSION: $TAG
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-canary'
   extends:
     - .deploy_chart
+    - .auto_notification_canary_deployment_template
   tags:
-    - uat
-  environment:
-    name: test-stable
-    url: $INGRESS_HOST
-    on_stop: remove-dynamic-test-stable
-  when: manual
-  only:
-    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
-
-remove-dynamic-test-stable:
-  stage: staging
-  extends:
-    - .remove_chart
-  tags:
-    - uat
-  environment:
-    name: test-stable
-    action: stop
-  when: manual
-  only:
-    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
-
-deploy-dev-caas:
-  stage: staging
-  needs: [ sign-image ]
-  variables:
-    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
-    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}-caas'
-  extends:
-    - .deploy_chart_caas
+    - asf-eks-oneapp-dev
   environment:
     name: dev
     url: $INGRESS_HOST
   only:
     - develop
-
-deploy-test-stable:
+deploy-dynamic-teststable:
   stage: staging
   needs: [ sign-image ]
   variables:
-    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}.myapp.uat.myhost.com'
+    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+  extends:
+    - .deploy_chart
+    - .auto_notification_dev_test_deployment_template
+  tags:
+    - teststable
+  environment:
+    name: teststable
+    url: $INGRESS_HOST
+    on_stop: remove-dynamic-teststable
+  when: manual
+  only:
+    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
+remove-dynamic-teststable:
+  stage: staging
+  extends:
+    - .remove_chart
+    - .auto_notification_remove_dynamic_deployment
+  tags:
+    - teststable
+  environment:
+    name: teststable
+    action: stop
+  when: manual
+  only:
+    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
+deploy-teststable:
+  stage: staging
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
     HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
   extends:
     - .deploy_chart
+    - .auto_notification_dev_test_deployment_template
   tags:
-    - uat
+    - teststable
   environment:
-    name: test-stable
+    name: teststable
     url: $INGRESS_HOST
   only:
     - develop
-
-deploy-uat:
-  stage: staging
-  dependencies: [ autoversion ]
+deploy-canary-uat:
+  stage: canary-deployment
+  dependencies: [ autoversion, snapshot ]
   needs:
     - job: sign-image-tag
     - job: autoversion
       artifacts: true
+    - job: snapshot
+      optional: true
+      artifacts: true
   variables:
-    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
+    CANARY_ENABLED: "true"
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
     HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
     IMAGE_VERSION: $TAG
   extends:
     - .deploy_chart
+    - .auto_notification_canary_deployment_template
   tags:
     - uat
   environment:
@@ -422,106 +436,27 @@ deploy-uat:
   only:
     - main
 
-deploy-prod-ref:
-  stage: pre-production
-  dependencies: [ current_version, snapshot ]
+deploy-uat:
+  stage: staging
+  dependencies: [ sign-image-tag, autoversion ]
   needs:
     - job: sign-image-tag
-    - job: snapshot
-      artifacts: true
-      optional: true
-    - job: current_version
-      optional: true
+    - job: autoversion
       artifacts: true
   variables:
-    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
     HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
     IMAGE_VERSION: $TAG
   extends:
     - .deploy_chart
+    - .auto_notification_deployment_template
   tags:
-    - prod-ref
+    - uat
   environment:
-    name: prod-ref
+    name: uat
     url: $INGRESS_HOST
   only:
-    - tags
-    - /^(hotfix)\/(ONEAPP|DOT)-\d{3,}$/
-
-deploy-prod:
-  stage: production
-  dependencies: [ current_version, snapshot ]
-  needs:
-    - job: sign-image-tag
-    - job: deploy-prod-ref
-    - job: current_version
-      optional: true
-      artifacts: true
-    - job: snapshot
-      optional: true
-      artifacts: true
-  variables:
-    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.${CI_ENVIRONMENT_NAME}.myhost.com'
-    IMAGE_VERSION: $TAG
-    HELM_NAMESPACE: '${CI_PROJECT_NAME}'
-  extends:
-    - .deploy_chart
-  tags:
-    - uat # fixme: set dev for testing, please change to prod
-  environment:
-    name: uat # fixme: set dev for testing, please change to prod
-    url: $INGRESS_HOST
-  only:
-    - tags
-    - /^(hotfix)\/(MYAPP|DOP)-\d{3,}$/
-
-deploy-canary-prod:
-  stage: production
-  dependencies: [ current_version, snapshot ]
-  needs:
-    - job: sign-image-tag
-    - job: deploy-prod-ref
-    - job: current_version
-      optional: true
-      artifacts: true
-    - job: snapshot
-      optional: true
-      artifacts: true
-  variables:
-    CANARY_ENABLED: "true"
-    INGRESS_HOST: '${CI_PROJECT_NAME}.myapp.uat.myhost.com'
-    IMAGE_VERSION: $TAG
-    HELM_NAMESPACE: '${CI_PROJECT_NAME}-canary'
-  extends:
-    - .deploy_chart
-  tags:
-    - uat # fixme: set dev for testing, please change to prod
-  environment:
-    name: uat # fixme: set dev for testing, please change to prod
-    url: $INGRESS_HOST
-  only:
-    - tags
-    - /^(hotfix)\/(MYAPP|DOP)-\d{3,}$/
-
-rollback-prod:
-  stage: rollback
-  extends:
-    - .rollback
-  needs:
-    - job: deploy-prod
-  tags:
-    - asf-eks-oneapp-dev
-  only:
-    - tags
-    - /^(hotfix)\/(MYAPP|DOP)-\d{3,}$/
-
-
-
-#  rules:
-#    - if: $CI_COMMIT_TAG
-#      when: never
-#    - if: $CI_COMMIT_BRANCH == "main" #$CI_DEFAULT_BRANCH
-
+    - main
 release-uat:
   stage: release
   dependencies: [ autoversion ]
@@ -533,7 +468,117 @@ release-uat:
     - .release-uat
   only:
     - main
-
+changelog:
+  stage: changelog
+  needs:
+    - job: release-uat
+  extends:
+    - .changelog
+  only:
+    - main
+deploy-canary-prod-ref:
+  stage: pre-production
+  dependencies: [sign-image, snapshot, autoversion]
+  needs:
+    - job: sign-image
+    - job: snapshot
+      artifacts: true
+      optional: true
+    - job: autoversion
+      optional: true
+      artifacts: true
+  variables:
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+    CANARY_ENABLED: "true"
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    HELM_ARGS: '--set environment.replicas.quantity=1'
+  extends:
+    - .deploy_chart
+    - .auto_notification_canary_deployment_template
+  tags:
+    - prod-ref
+  only:
+    - tags
+  environment:
+    name: prod-ref
+    url: $INGRESS_HOST
+deploy-prod-ref:
+  stage: pre-production
+  dependencies: [sign-image, snapshot, autoversion]
+  needs:
+    - job: sign-image
+    - job: snapshot
+      artifacts: true
+      optional: true
+    - job: autoversion
+      optional: true
+      artifacts: true
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+  extends:
+    - .deploy_chart
+    - .auto_notification_deployment_template
+  tags:
+    - prod-ref
+  environment:
+    name: prod-ref
+    url: $INGRESS_HOST
+  only:
+    - tags
+    - /^(hotfix)\/(MPF|DOT)-\d{3,}$/
+deploy-canary-prod:
+  stage: production
+  dependencies: [sign-image, snapshot, autoversion]
+  needs:
+    - job: sign-image
+    - job: deploy-prod-ref
+    - job: autoversion
+      optional: true
+      artifacts: true
+    - job: snapshot
+      optional: true
+      artifacts: true
+  variables:
+    CANARY_ENABLED: "true"
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+    HELM_ARGS: '--set environment.replicas.quantity=1'
+  extends:
+    - .deploy_chart
+    - .auto_notification_canary_deployment_template
+  tags:
+    - prod
+  environment:
+    name: prod
+    url: $INGRESS_HOST
+  only:
+    - tags
+deploy-prod:
+  stage: production
+  dependencies: [ sign-image, autoversion, snapshot]
+  needs:
+    - job: sign-image
+    - job: deploy-prod-ref
+    - job: snapshot
+      optional: true
+      artifacts: true
+    - job: autoversion
+      optional: true
+      artifacts: true
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+  extends:
+    - .deploy_chart
+    - .auto_notification_deployment_template
+  tags:
+    - prod
+  environment:
+    name: prod
+    url: $INGRESS_HOST
+  only:
+    - tags
 release-prod:
   stage: release
   dependencies: [ current_version ]
@@ -545,7 +590,6 @@ release-prod:
     - .release-prod
   only:
     - tags
-
 release-canary-prod:
   stage: release
   dependencies: [ current_version ]
@@ -555,26 +599,156 @@ release-canary-prod:
       artifacts: true
   extends:
     - .release-prod
+    - .auto_notification_canary_deployment_template
   only:
     - tags
-
-
-changelog:
-  stage: changelog
-  needs:
-    - job: release-uat
+rollback-prod:
+  stage: rollback
   extends:
-    - .changelog
+    - .rollback
+  needs:
+    - job: deploy-prod
+  tags:
+    - asf-eks-oneapp-dev
   only:
-    - main
+    - tags
+    - /^(hotfix)\/(MPF|DOT)-\d{3,}$/
+Grafana-K6:
+  stage: loadtesting
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+  extends:
+    - .k6_loadtesting
+  when: manual
+  only:
+    - /^(release|feature|hotfix|bugfix)\/(MPF|DOT)-\d{3,}$/
+  needs: [ deploy-dynamic-dev ]
 
-#auto_notification_deployment:
-#  stage: notification
-#  needs: [ deploy-dynamic-dev ]
-#  allow_failure: true
-#  extends:
-#    - .auto_notification_deployment_template
-#  rules:
-#    - if: $CI_PIPELINE_SOURCE != "merge_request_event"
-#      when: never
-#    - when: always
+###############===== MPF release job ========###############
+mpf-release-deploy-dynamic-dev:
+  stage: mpf-release-deployment
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+  extends:
+    - .deploy_chart
+    - .auto_notification_dev_test_deployment_template
+  tags:
+    - asf-eks-oneapp-dev
+  environment:
+    name: dev
+    url: $INGRESS_HOST
+    on_stop: remove-dynamic-dev
+  when: manual
+  only:
+    - /^MPFRelease.*/
+mpf-release-remove-dynamic-dev:
+  stage: mpf-release-deployment
+  extends:
+    - .remove_chart
+    - .auto_notification_remove_dynamic_deployment
+  tags:
+    - asf-eks-oneapp-dev
+  environment:
+    name: dev
+    action: stop
+  when: manual
+  only:
+    -  /^MPFRelease.*/
+mpf-release-deploy-dev:
+  stage: mpf-release-deployment
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+  extends:
+    - .deploy_chart
+    - .auto_notification_dev_test_deployment_template
+  tags:
+    - asf-eks-oneapp-dev
+  environment:
+    name: dev
+    url: $INGRESS_HOST
+  only:
+    - /^MPFRelease.*/
+mpf-release-deploy-dynamic-teststable:
+  stage: mpf-release-deployment
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+  extends:
+    - .deploy_chart
+    - .auto_notification_dev_test_deployment_template
+  tags:
+    - teststable
+  environment:
+    name: teststable
+    url: $INGRESS_HOST
+    on_stop: remove-dynamic-teststable
+  when: manual
+  only:
+    - /^MPFRelease.*/
+mpf-release-remove-dynamic-teststable:
+  stage: mpf-release-deployment
+  extends:
+    - .remove_chart
+    - .auto_notification_remove_dynamic_deployment
+  tags:
+    - teststable
+  environment:
+    name: teststable
+    action: stop
+  when: manual
+  only:
+    - /^MPFRelease.*/
+mpf-release-deploy-teststable:
+  stage: mpf-release-deployment
+  needs: [ sign-image ]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+  extends:
+    - .deploy_chart
+    - .auto_notification_dev_test_deployment_template
+  tags:
+    - teststable
+  environment:
+    name: teststable
+    url: $INGRESS_HOST
+  only:
+    - /^MPFRelease.*/
+mpf-release-deploy-uat:
+  stage: mpf-release-deployment
+  needs: [sign-image]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+    IMAGE_VERSION: $TAG
+  extends:
+    - .deploy_chart
+    - .auto_notification_deployment_template
+  tags:
+    - uat
+  environment:
+    name: uat
+    url: $INGRESS_HOST
+  only:
+    - /^MPFRelease.*/
+mpf-release-deploy-prod-ref:
+  stage: mpf-release-deployment
+  needs: [sign-image]
+  variables:
+    INGRESS_HOST: '${CI_PROJECT_NAME}.oneapp.${CI_ENVIRONMENT_NAME}.hal.telekom.de'
+    HELM_NAMESPACE: '${CI_PROJECT_NAME}-${CI_ENVIRONMENT_NAME}'
+    IMAGE_VERSION: $TAG
+  extends:
+    - .deploy_chart
+    - .auto_notification_deployment_template
+  tags:
+    - prod-ref
+  environment:
+    name: prod-ref
+    url: $INGRESS_HOST
+  only:
+    - tags
+    - /^MPFRelease.*/
